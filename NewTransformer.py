@@ -75,6 +75,7 @@ class DecoderBlock(nn.Module):
 
     def __init__(self, device, embed_dim) -> None:
         super().__init__()
+        self.device = device
         self.attention1 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=12, device=device,
                                                batch_first=True)
         self.attention2 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=12, device=device,
@@ -127,22 +128,22 @@ class DecoderBlock(nn.Module):
         self.influence_dropout3 = nn.Dropout(0.1)
 
     def forward(self, X, Y, Z):
-        if X.dim == 3:
+        if X.dim() == 3:
             X.squeeze(0)
             Y.squeeze(0)
             Z.squeeze(0)
         seq_len = X.shape[0]
-        mask = torch.triu(torch.ones(seq_len, seq_len) * float('-inf'), diagonal=1)
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=self.device) * float('-inf'), diagonal=1)
 
-        att1 = self.attention1(X, X, X)
+        att1, _ = self.attention1(X, X, X)
         att1 = self.attn_dropout1(att1)
         norm1_1 = self.normalization1_1(att1 + X)
 
-        att2 = self.attention2(Y, Y, Y)
+        att2, _ = self.attention2(Y, Y, Y)
         att2 = self.attn_dropout2(att2)
         norm1_2 = self.normalization1_2(att2 + Y, attn_mask=mask)
 
-        att3 = self.attention2(Z, Z, Z)
+        att3, _ = self.attention3(Z, Z, Z)
         att3 = self.attn_dropout3(att3)
         norm1_3 = self.normalization1_3(att3 + Z, attn_mask=mask)
 
