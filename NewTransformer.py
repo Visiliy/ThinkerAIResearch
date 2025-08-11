@@ -56,7 +56,7 @@ class MultiHeadInfluence(nn.Module):
 
         result = torch.matmul(Q1, V1.transpose(-2, -1))
         result = torch.matmul(result, K1)
-        result = torch.matmul(result, V2.transpose(-2, -1)) / torch.sqrt(self.head_dim)
+        result = torch.matmul(result, V2.transpose(-2, -1)) / self.head_dim ** 0.5
         result = F.softmax(result)
 
         result1 = torch.matmul(result, Q2)
@@ -129,9 +129,9 @@ class DecoderBlock(nn.Module):
 
     def forward(self, X, Y, Z):
         if X.dim() == 3:
-            X.squeeze(0)
-            Y.squeeze(0)
-            Z.squeeze(0)
+            X = X.squeeze(0)
+            Y = Y.squeeze(0)
+            Z = Z.squeeze(0)
         seq_len = X.shape[0]
         mask = torch.triu(torch.ones(seq_len, seq_len, device=self.device) * float('-inf'), diagonal=1)
 
@@ -139,13 +139,13 @@ class DecoderBlock(nn.Module):
         att1 = self.attn_dropout1(att1)
         norm1_1 = self.normalization1_1(att1 + X)
 
-        att2, _ = self.attention2(Y, Y, Y)
+        att2, _ = self.attention2(Y, Y, Y, attn_mask=mask)
         att2 = self.attn_dropout2(att2)
-        norm1_2 = self.normalization1_2(att2 + Y, attn_mask=mask)
+        norm1_2 = self.normalization1_2(att2 + Y)
 
-        att3, _ = self.attention3(Z, Z, Z)
+        att3, _ = self.attention3(Z, Z, Z, attn_mask=mask)
         att3 = self.attn_dropout3(att3)
-        norm1_3 = self.normalization1_3(att3 + Z, attn_mask=mask)
+        norm1_3 = self.normalization1_3(att3 + Z)
 
         Q, K, V = self.influence(norm1_1, norm1_2, norm1_3)
 
@@ -173,7 +173,7 @@ class ALT(nn.Module):
     def __init__(self, embed_dim, out_size, divie):
         super().__init__()
 
-        self.influence = MultiHeadInfluence(embed_dim=embed_dim, num_heads=12)
+        self.influence = MultiHeadInfluence(mbed_dim=embed_dim, num_heads=12)
         self.decoderes = nn.ModuleList([DecoderBlock(embed_dim=embed_dim, device=divie) for _ in range(10)])
 
         self.mlp1 = nn.Sequential(
@@ -232,3 +232,13 @@ class ALT(nn.Module):
         token_predict1 = self.token_predictor1(norm2_1)
         token_predict2 = self.token_predictor2(norm2_2)
         return token_predict1, token_predict2
+
+
+model = ALT(embed_dim=132, divie=torch.device('cpu'), out_size=64)
+X = torch.rand(10, 132)
+Y = torch.rand(10, 132)
+Z = torch.rand(10, 132)
+x, y = model(X, Y, Z)
+print(x.shape)
+print(y.shape)
+# python3 NewTransformer.py
