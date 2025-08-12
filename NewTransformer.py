@@ -25,6 +25,15 @@ class MultiHeadInfluence(nn.Module):
         self.linear_out2 = nn.Linear(mbed_dim, mbed_dim)
         self.linear_out3 = nn.Linear(mbed_dim, mbed_dim)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     def split_heads(self, X, num_heads, head_dim):
         if X.dim() == 2:
             X = X.unsqueeze(0)
@@ -69,7 +78,7 @@ class MultiHeadInfluence(nn.Module):
         V_new = self.combine_heads(result3)
 
         return self.linear_out1(Q_new), self.linear_out2(K_new), self.linear_out3(V_new)
-    
+
 
 class MultiHeadInfluence2D(nn.Module):
 
@@ -87,6 +96,15 @@ class MultiHeadInfluence2D(nn.Module):
 
         self.linear_out1 = nn.Linear(mbed_dim, mbed_dim)
         self.linear_out2 = nn.Linear(mbed_dim, mbed_dim)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def split_heads(self, X, num_heads, head_dim):
         if X.dim() == 2:
@@ -118,6 +136,9 @@ class MultiHeadInfluence2D(nn.Module):
         inf_K = torch.matmul(result, K2)
         inf_V = torch.matmul(result, V2)
 
+        inf_K = self.combine_heads(inf_K)
+        inf_V = self.combine_heads(inf_V)
+
         return self.linear_out1(inf_K), self.linear_out2(inf_V)
 
 
@@ -127,11 +148,11 @@ class DecoderBlock(nn.Module):
         super().__init__()
         self.device = device
         self.attention1 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=12, device=device,
-                                               batch_first=True)
+                                                batch_first=True)
         self.attention2 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=12, device=device,
-                                               batch_first=True)
+                                                batch_first=True)
         self.attention3 = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=12, device=device,
-                                               batch_first=True)
+                                                batch_first=True)
 
         self.influence = MultiHeadInfluence(mbed_dim=embed_dim, num_heads=12)
 
@@ -177,6 +198,15 @@ class DecoderBlock(nn.Module):
         self.influence_dropout2 = nn.Dropout(0.1)
         self.influence_dropout3 = nn.Dropout(0.1)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     def forward(self, X, Y, Z):
         if X.dim() == 3:
             X = X.squeeze(0)
@@ -215,7 +245,8 @@ class DecoderBlock(nn.Module):
         mlp2 = self.ffn_dropout2(mlp2)
         mlp3 = self.ffn_dropout3(mlp3)
 
-        return self.normalization3_1(mlp1 + norm2_1), self.normalization3_2(mlp2 + norm2_2), self.normalization3_3(mlp3 + norm2_3)
+        return self.normalization3_1(mlp1 + norm2_1), self.normalization3_2(mlp2 + norm2_2), self.normalization3_3(
+            mlp3 + norm2_3)
 
 
 class GaussianBlock(nn.Module):
@@ -258,6 +289,15 @@ class GaussianBlock(nn.Module):
 
         self.gaussian_dropout1 = nn.Dropout(0.1)
         self.gaussian_dropout2 = nn.Dropout(0.1)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, Y, Z):
         if Y.dim() == 3:
