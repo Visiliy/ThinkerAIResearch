@@ -56,7 +56,7 @@ class MultiHeadInfluence(nn.Module):
 
         result = torch.matmul(Q1, V1.transpose(-2, -1))
         result = torch.matmul(result, K1)
-        result = torch.matmul(result, V2.transpose(-2, -1)) / self.head_dim ** 0.5
+        result = torch.matmul(result, V2.transpose(-2, -1)) / (self.head_dim ** 0.5)
         result = F.softmax(result)
 
         result1 = torch.matmul(result, Q2)
@@ -69,6 +69,56 @@ class MultiHeadInfluence(nn.Module):
         V_new = self.combine_heads(result3)
 
         return self.linear_out1(Q_new), self.linear_out2(K_new), self.linear_out3(V_new)
+    
+
+class MultiHeadInfluence2D(nn.Module):
+
+    def __init__(self, mbed_dim, num_heads):
+        super().__init__()
+        self.mbed_dim = mbed_dim
+        self.num_heads = num_heads
+        self.head_dim = mbed_dim // num_heads
+
+        self.key1 = nn.Linear(in_features=mbed_dim, out_features=mbed_dim)
+        self.key2 = nn.Linear(in_features=mbed_dim, out_features=mbed_dim)
+
+        self.value1 = nn.Linear(in_features=mbed_dim, out_features=mbed_dim)
+        self.value2 = nn.Linear(in_features=mbed_dim, out_features=mbed_dim)
+
+        self.linear_out1 = nn.Linear(mbed_dim, mbed_dim)
+        self.linear_out2 = nn.Linear(mbed_dim, mbed_dim)
+
+    def split_heads(self, X, num_heads, head_dim):
+        if X.dim() == 2:
+            X = X.unsqueeze(0)
+        batch_size, seq_len, embed_dim = X.size()
+        X = X.view(batch_size, seq_len, num_heads, head_dim)
+        return X.transpose(1, 2)
+
+    def combine_heads(self, X):
+        batch_size, num_heads, seq_len, head_dim = X.size()
+        X = X.transpose(1, 2).contiguous()
+        return X.view(batch_size, seq_len, num_heads * head_dim)
+
+    def forward(self, Y, Z):
+        sh = Y.shape
+        if len(sh) == 3:
+            Y = Y.squeeze(0)
+            Z = Z.squeeze(0)
+
+        K1 = self.split_heads(self.key1(Y), head_dim=self.head_dim, num_heads=self.num_heads)
+        K2 = self.split_heads(self.key2(Y), head_dim=self.head_dim, num_heads=self.num_heads)
+
+        V1 = self.split_heads(self.value1(Z), head_dim=self.head_dim, num_heads=self.num_heads)
+        V2 = self.split_heads(self.value2(Z), head_dim=self.head_dim, num_heads=self.num_heads)
+
+        result = torch.matmul(K1, V1.transpose(-2, -1)) / (self.mbed_dim ** 0.5)
+        result = F.softmax(result)
+
+        inf_K = torch.matmul(result, K2)
+        inf_V = torch.matmul(result, V2)
+
+        return self.linear_out1(inf_K), self.linear_out2(inf_V)
 
 
 class DecoderBlock(nn.Module):
@@ -168,6 +218,95 @@ class DecoderBlock(nn.Module):
         return self.normalization3_1(mlp1 + norm2_1), self.normalization3_2(mlp2 + norm2_2), self.normalization3_3(mlp3 + norm2_3)
 
 
+class GaussianBlock(nn.Module):
+
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.v1 = nn.Parameter(torch.randn(embed_dim))
+        self.logit_alpha1 = nn.Parameter(torch.tensor(0.0))
+        self.logit_beta1 = nn.Parameter(torch.tensor(0.0))
+
+        self.v2 = nn.Parameter(torch.randn(embed_dim))
+        self.logit_alpha2 = nn.Parameter(torch.tensor(0.0))
+        self.logit_beta2 = nn.Parameter(torch.tensor(0.0))
+
+        self.influence2D = MultiHeadInfluence2D(embed_dim, num_heads=12)
+
+        self.mlp1 = nn.Sequential(
+            nn.Linear(in_features=embed_dim, out_features=embed_dim * 4),
+            nn.GELU(),
+            nn.Linear(in_features=embed_dim * 4, out_features=embed_dim)
+        )
+
+        self.mlp2 = nn.Sequential(
+            nn.Linear(in_features=embed_dim, out_features=embed_dim * 4),
+            nn.GELU(),
+            nn.Linear(in_features=embed_dim * 4, out_features=embed_dim)
+        )
+
+        self.normalization1_1 = nn.LayerNorm(embed_dim)
+        self.normalization1_2 = nn.LayerNorm(embed_dim)
+
+        self.normalization2_1 = nn.LayerNorm(embed_dim)
+        self.normalization2_2 = nn.LayerNorm(embed_dim)
+
+        self.ffn_dropout1 = nn.Dropout(0.1)
+        self.ffn_dropout2 = nn.Dropout(0.1)
+
+        self.influence_dropout1 = nn.Dropout(0.1)
+        self.influence_dropout2 = nn.Dropout(0.1)
+
+        self.gaussian_dropout1 = nn.Dropout(0.1)
+        self.gaussian_dropout2 = nn.Dropout(0.1)
+
+    def forward(self, Y, Z):
+        if Y.dim() == 3:
+            Y = Y.squeeze(0)
+            Z = Z.squeeze(0)
+        v_norm1 = self.v1 / self.v1.norm(p=2)
+        alpha1 = torch.sigmoid(self.logit_alpha1)
+        beta1 = torch.sigmoid(self.logit_beta1)
+        noise1 = torch.randn_like(Y)
+
+        v_norm2 = self.v2 / self.v2.norm(p=2)
+        alpha2 = torch.sigmoid(self.logit_alpha2)
+        beta2 = torch.sigmoid(self.logit_beta2)
+        noise2 = torch.randn_like(Z)
+
+        proj1 = (noise1 @ v_norm1.unsqueeze(1)).squeeze(1).unsqueeze(1) * v_norm1.unsqueeze(0)
+        ortho_noise1 = noise1 - proj1
+
+        proj2 = (noise2 @ v_norm2.unsqueeze(1)).squeeze(1).unsqueeze(1) * v_norm2.unsqueeze(0)
+        ortho_noise2 = noise2 - proj2
+
+        noise_directed1 = alpha1 * proj1 + (1 - alpha1) * ortho_noise1
+        noise_directed2 = alpha2 * proj2 + (1 - alpha2) * ortho_noise2
+
+        result1 = (torch.sqrt(1 - beta1) * Y) + (torch.sqrt(beta1) * noise_directed1)
+        result2 = (torch.sqrt(1 - beta2) * Z) + (torch.sqrt(beta2) * noise_directed2)
+
+        result1 = self.gaussian_dropout1(result1)
+        result2 = self.gaussian_dropout2(result2)
+
+        inf_K, inf_V = self.influence2D(result1, result2)
+        inf_K = self.influence_dropout1(inf_K)
+        inf_V = self.influence_dropout2(inf_V)
+
+        norm1 = self.normalization1_1(inf_K + result1)
+        norm2 = self.normalization1_2(inf_V + result2)
+
+        mlp1 = self.mlp1(norm1)
+        mlp2 = self.mlp2(norm2)
+
+        mlp1 = self.ffn_dropout1(mlp1)
+        mlp2 = self.ffn_dropout2(mlp2)
+
+        nor2_1 = self.normalization2_1(mlp1 + norm1)
+        norm2_2 = self.normalization2_2(mlp2 + norm2)
+
+        return nor2_1, norm2_2
+
+
 class ALT(nn.Module):
 
     def __init__(self, embed_dim, out_size, divie):
@@ -175,6 +314,7 @@ class ALT(nn.Module):
 
         self.influence = MultiHeadInfluence(mbed_dim=embed_dim, num_heads=12)
         self.decoderes = nn.ModuleList([DecoderBlock(embed_dim=embed_dim, device=divie) for _ in range(10)])
+        self.gaussians = nn.ModuleList([GaussianBlock(embed_dim=embed_dim) for _ in range(10)])
 
         self.mlp1 = nn.Sequential(
             nn.Linear(in_features=embed_dim, out_features=embed_dim * 4),
@@ -217,8 +357,8 @@ class ALT(nn.Module):
             X, Y, Z = layer(X, Y, Z)
         _, inf1, inf2 = self.influence(X, Y, Z)
 
-        inf1 = self.influence_dropout1(Y)
-        inf2 = self.influence_dropout2(Z)
+        inf1 = self.influence_dropout1(inf1)
+        inf2 = self.influence_dropout2(inf2)
 
         norm1 = self.normalization1_1(inf1 + Y)
         norm2 = self.normalization1_2(inf2 + Z)
@@ -228,6 +368,9 @@ class ALT(nn.Module):
 
         norm2_1 = self.normalization2_1(mlp1 + norm1)
         norm2_2 = self.normalization2_2(mlp2 + norm2)
+
+        for layer in self.gaussians:
+            norm2_1, norm2_2 = layer(norm2_1, norm2_2)
 
         token_predict1 = self.token_predictor1(norm2_1)
         token_predict2 = self.token_predictor2(norm2_2)
