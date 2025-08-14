@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from random import random
 import torch.nn.functional as F
 
 
@@ -43,56 +44,71 @@ class ThinkingHeadsBlock(nn.Module):
 
     def __init__(self, seq_size, embed_dim, num_head):
         super().__init__()
+        self.embed_dim = embed_dim
         self.head_dim = embed_dim // num_head
+        self.num_head = num_head
+        self.max_heads = 12 
+
+        self.sigmoid_param1 = nn.Parameter(torch.rand(1))
+        self.sigmoid_param2 = nn.Parameter(torch.rand(1))
+        self.m1 = nn.Parameter(torch.randn(self.max_heads, embed_dim))
+        self.m2 = nn.Linear(embed_dim, 1) 
+        self.mix_layer = nn.Linear(embed_dim, embed_dim)
+        self.matrix = nn.Parameter(torch.randn(seq_size, 1))
+
         self.matrix = nn.Parameter(torch.randn((seq_size, 1)))
         self.attention = MultiHeadWordAttention(embed_dim=embed_dim, num_head=num_head)
 
         self.mlp = nn.Sequential(
-            nn.Linear(in_features=embed_dim, out_features=embed_dim * 4),
+            nn.Linear(in_features=self.embed_dim, out_features=self.embed_dim * 4),
             nn.GELU(),
-            nn.Linear(in_features=embed_dim * 4, out_features=embed_dim)
+            nn.Linear(in_features=self.embed_dim * 4, out_features=self.embed_dim)
         )
 
-        self.norm1 = nn.LayerNorm(embed_dim, embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim, embed_dim)
+        self.norm1 = nn.LayerNorm(self.embed_dim, self.embed_dim)
+        self.norm2 = nn.LayerNorm(self.embed_dim, self.embed_dim)
 
         self.attention_dropout = nn.Dropout(0.1)
         self.ffn_dropout = nn.Dropout(0.1)
 
-        self.linear = nn.Linear((embed_dim // num_head), embed_dim)
-
         self.thought_scorer = nn.Linear(self.head_dim, 1)
-        self.linear_out = nn.Linear(self.head_dim, embed_dim)
+        self.linear_out = nn.Linear(self.embed_dim, self.embed_dim)
 
-    def split_heads(self, X, num_heads, head_dim):
-        if X.dim() == 3:
-            X = X.squeeze(0)
-        batch_size, embed_dim = X.size()
-        X = X.view(batch_size, num_heads, head_dim)
-        return X
 
     def forward(self, word, text):
+        batch_size = word.size(0)
+
+        h = torch.round(12 * torch.sigmoid(self.sigmoid_param1)).clamp(1, 12).long()
+        k = torch.round(12 * torch.sigmoid(self.sigmoid_param2)).clamp(1, h.item()).long()
+
         text_vector = torch.matmul(text.transpose(-2, -1), self.matrix).transpose(-2, -1)
 
-        attention = self.attention(word, text_vector)
+        doubled_tensor = word.repeat(1, h.item(), 1) 
+        doubled_tensor = doubled_tensor * self.m1[:h.item()]
+
+        k_scores = self.m2(doubled_tensor)
+        k_probs = torch.sigmoid(k_scores)
+        _, k_indices = torch.topk(k_probs, k=k.item(), dim=1)
+        K_heads = doubled_tensor.gather(1, k_indices.expand(-1, -1, self.embed_dim))
+
+        L = torch.mean(self.mix_layer(K_heads), dim=1, keepdim=True)
+
+
+        attention = self.attention(L, text_vector)
         attention = self.attention_dropout(attention)
 
-        norm1 = self.norm1(attention + word + text_vector)
+        norm1 = self.norm1(attention + L + text_vector)
 
         mlp = self.mlp(norm1)
         mlp = self.ffn_dropout(mlp)
 
         norm2 = self.norm2(mlp + norm1)
 
-        heads = self.split_heads(norm2, num_heads=12, head_dim=(norm2.shape[-1] // 12))
-        thought_scores = self.thought_scorer(heads).squeeze(-1)
-        selected_head_idx = thought_scores.argmax(dim=-1, keepdim=True)
-        selected_thought = heads.gather(1, selected_head_idx.unsqueeze(-1).expand(-1, -1, self.head_dim)).squeeze(1)
-
-        return self.linear_out(selected_thought)
+        return self.linear_out(norm2)
 
 
 class Conscience(nn.Module):
+
 
     def __init__(self, seq_size, embed_dim, num_head, out_dim):
         super().__init__()
