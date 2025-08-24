@@ -1,34 +1,30 @@
+from transformers import AutoTokenizer, AutoModel
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
-class Influence(nn.Module):
+tokenizer = AutoTokenizer.from_pretrained('cointegrated/rubert-tiny', use_fast=True)
+model = AutoModel.from_pretrained('cointegrated/rubert-tiny')
 
-    def __init__(self, embed_dim):
-        super().__init__()
-        self.linear1 = nn.Linear(embed_dim, embed_dim)
-        self.linear2 = nn.Linear(embed_dim, embed_dim)
-        self.linear3 = nn.Linear(embed_dim, embed_dim)
+text = "По словам Дмитрия Донского, в 1998 году он был первым человеком, который смог"
 
-        self.out_linear1 = nn.Linear(embed_dim, embed_dim)
-        self.out_linear2 = nn.Linear(embed_dim, embed_dim)
-        self.out_linear3 = nn.Linear(embed_dim, embed_dim)
+inputs = tokenizer(text, return_tensors='pt', return_offsets_mapping=True, add_special_tokens=True)
 
-    def apply_permute(self, tensor_lists):
-        new_tensor_lists = []
-        for tensor, one, two, three in tensor_lists:
-            tensor = tensor.permute(one, two, three)
-            new_tensor_lists.append(tensor)
-        return new_tensor_lists
+model_inputs = {k: v for k, v in inputs.items() if k != 'offset_mapping'}
+with torch.no_grad():
+    outputs = model(**model_inputs)
 
-    def forward(self, Q, K, V):
-        Q, K, V = self.apply_permute([[Q, 2, 0, 1], [K, 2, 0, 1], [V, 2, 0, 1]])
+last_hidden_states = outputs.last_hidden_state.squeeze(0)
+seq, embed_dim = last_hidden_states.shape
+vector = last_hidden_states.flatten()
 
-        Q = self.linear1(Q)
-        K = self.linear2(K)
-        V = self.linear3(V)
-
-        Q, K, V = self.apply_permute([[Q, 1, 2, 0], [K, 1, 2, 0], [V, 1, 2, 0]])
-
-        return self.out_linear1(Q), self.out_linear2(K), self.out_linear3(V)
+fft_vector = torch.fft.fft(vector)
+amplitude_spectrum = torch.abs(fft_vector).cpu().numpy()
+result = torch.tensor(amplitude_spectrum.reshape((seq, embed_dim)))
+print(result)
+plt.figure(figsize=(12, 6))
+plt.plot(amplitude_spectrum)
+plt.xlabel('Frequency')
+plt.ylabel('Amplitude')
+plt.title('Amplitude Spectrum')
+plt.show()
