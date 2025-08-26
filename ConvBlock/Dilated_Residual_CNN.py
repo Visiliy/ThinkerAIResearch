@@ -27,7 +27,6 @@ class OptimizedDilatedResidual(nn.Module):
         self.branch_weights = nn.Parameter(torch.ones(len(dilations)))
         self.temperature = nn.Parameter(torch.tensor(1.0))
 
-        # Fusion layer
         self.fusion = nn.Linear(channels * len(dilations), channels)
         self.norm = nn.LayerNorm(channels)
         self.dropout = nn.Dropout(dropout)
@@ -40,7 +39,6 @@ class OptimizedDilatedResidual(nn.Module):
         branch_outputs = []
         for i, dilation in enumerate(self.dilations):
             if self.use_glu:
-                # Gated Linear Unit
                 conv_out = self.conv_branches[i](x_t)
                 gate = torch.sigmoid(self.gate_branches[i](x_t))
                 branch_out = conv_out * gate

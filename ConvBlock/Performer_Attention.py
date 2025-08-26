@@ -26,8 +26,8 @@ class LinearPerformerAttention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim=-1)
         q, k, v = map(lambda t: t.reshape(b, n, h, -1).transpose(1, 2), qkv)
 
-        q_proj = torch.einsum('bhnd,bhdf->bhnf', q, self.proj_matrix)
-        k_proj = torch.einsum('bhnd,bhdf->bhnf', k, self.proj_matrix)
+        q_proj = torch.einsum('bhnd,hdf->bhnf', q, self.proj_matrix)
+        k_proj = torch.einsum('bhnd,hdf->bhnf', k, self.proj_matrix)
 
         q_proj = F.elu(q_proj) + 1
         k_proj = F.elu(k_proj) + 1
@@ -35,7 +35,8 @@ class LinearPerformerAttention(nn.Module):
         k_v = torch.einsum('bhnf,bhnd->bhfd', k_proj, v)
         attention_out = torch.einsum('bhnf,bhfd->bhnd', q_proj, k_v)
 
-        z = 1.0 / (torch.einsum('bhnf,bhfn->bhn', q_proj, k_proj.transpose(2, 3)) + 1e-8)
+        k_proj_sum = k_proj.sum(dim=2, keepdim=True)
+        z = 1.0 / (torch.einsum('bhnf,bhf->bhn', q_proj, k_proj_sum.squeeze(2)) + 1e-8)
         attention_out = attention_out * z.unsqueeze(-1)
 
         attention_out = attention_out.transpose(1, 2).reshape(b, n, -1)

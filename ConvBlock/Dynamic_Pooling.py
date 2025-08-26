@@ -18,10 +18,20 @@ class DynamicPooling(nn.Module):
         x = x.transpose(1, 2)
 
         if self.mode == 'adaptive':
-            pooled = self.pool(x)
+            if self.output_size is None:
+                seq_len = x.size(2)
+                pool_size = max(8, seq_len // 4)
+                pooled = F.adaptive_avg_pool1d(x, pool_size)
+            else:
+                pooled = self.pool(x)
         elif self.mode == 'learnable':
-            avg_pool = F.adaptive_avg_pool1d(x, self.output_size)
-            max_pool = F.adaptive_max_pool1d(x, self.output_size)
+            if self.output_size is None:
+                seq_len = x.size(2)
+                pool_size = max(8, seq_len // 4)
+            else:
+                pool_size = self.output_size
+            avg_pool = F.adaptive_avg_pool1d(x, pool_size)
+            max_pool = F.adaptive_max_pool1d(x, pool_size)
             pooled = self.alpha * avg_pool + (1 - self.alpha) * max_pool
         else:
             seq_len = x.size(2)

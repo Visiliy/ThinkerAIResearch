@@ -46,7 +46,8 @@ class LinearLocalAttention(nn.Module):
             k_v = torch.einsum('bhnf,bhnd->bhfd', k_proj, v_window)
             attn_out = torch.einsum('bhnf,bhfd->bhnd', q_proj, k_v)
 
-            z = 1.0 / (torch.einsum('bhnf,bhfn->bhn', q_proj, k_proj.transpose(2, 3)) + 1e-8)
+            k_proj_sum = k_proj.sum(dim=2, keepdim=True)
+            z = 1.0 / (torch.einsum('bhnf,bhf->bhn', q_proj, k_proj_sum.squeeze(2)) + 1e-8)
             attn_out = attn_out * z.unsqueeze(-1)
 
             output[:, :, center:center + 1, :] = attn_out

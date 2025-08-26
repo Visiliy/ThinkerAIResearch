@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -13,7 +14,7 @@ class TokenMerging(nn.Module):
         b, s, d = x.shape
         if s % self.reduction_ratio != 0:
             pad_len = self.reduction_ratio - (s % self.reduction_ratio)
-            x = F.pad(x, (0, 0, 0, pad_len))
+            x = F.pad(x, (0, 0, 0, pad_len, 0, 0))
             s = s + pad_len
 
         x = x.view(b, s // self.reduction_ratio, self.reduction_ratio * d)

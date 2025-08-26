@@ -1,27 +1,23 @@
 import torch
 import torch.nn as nn
-from ConvBlock import ConvBlock, DynamicPooling, LinearPerformerAttention, LinearParameterizationKernel, FastKernelCompression, LinearBlockSparseAttention, OptimizedDilatedResidual, TokenMerging, LinearLocalAttention, LinearDynamicInceptionBlock
+from ConvBlock import DynamicPooling, LinearPerformerAttention, LinearParameterizationKernel, FastKernelCompression, LinearBlockSparseAttention, OptimizedDilatedResidual, TokenMerging, LinearLocalAttention, LinearDynamicInceptionBlock
+from ConvBlockModel import ConvBlock
 
 
 def test_conv_block():
-    """Тестирование основного ConvBlock"""
     print("=== Тестирование ConvBlock ===")
     
-    # Параметры теста
     batch_size = 2
     seq_len = 64
     dim = 256
     heads = 8
-    
-    # Создаем модель
+
     model = ConvBlock(dim=dim, heads=heads, dropout=0.1)
-    
-    # Создаем тестовые данные
+
     x = torch.randn(batch_size, seq_len, dim)
     
     print(f"Входные данные: {x.shape}")
     
-    # Тестируем forward pass
     try:
         with torch.no_grad():
             output = model(x)
@@ -34,7 +30,6 @@ def test_conv_block():
 
 
 def test_individual_components():
-    """Тестирование отдельных компонентов"""
     print("\n=== Тестирование отдельных компонентов ===")
     
     batch_size = 2
@@ -70,7 +65,6 @@ def test_individual_components():
 
 
 def test_gradient_flow():
-    """Тестирование потока градиентов"""
     print("\n=== Тестирование потока градиентов ===")
     
     batch_size = 1
@@ -95,7 +89,6 @@ def test_gradient_flow():
 
 
 def test_memory_usage():
-    """Тестирование использования памяти"""
     print("\n=== Тестирование использования памяти ===")
     
     if torch.cuda.is_available():
@@ -113,7 +106,6 @@ def test_memory_usage():
     x = torch.randn(batch_size, seq_len, dim).to(device)
     
     try:
-        # Очищаем кэш GPU если доступен
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             initial_memory = torch.cuda.memory_allocated()
@@ -139,7 +131,6 @@ def main():
     print(f"PyTorch версия: {torch.__version__}")
     print(f"CUDA доступна: {torch.cuda.is_available()}")
     
-    # Запускаем все тесты
     tests = [
         test_conv_block,
         test_individual_components,
@@ -156,7 +147,6 @@ def main():
             print(f"❌ Ошибка в тесте {test.__name__}: {e}")
             results.append(False)
     
-    # Итоговый результат
     print("\n" + "="*50)
     print("📊 ИТОГОВЫЕ РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ")
     print("="*50)
